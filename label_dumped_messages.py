@@ -1,22 +1,36 @@
 # dumped_file line format example: 
 # [*] NetworkPerformanceProfileMessage: pMessage: 0x1bc3bc20 ( Category: -964876421 | Type: 880806691 ) T: 0x1444daf60 R: 0x140a9219f 
-def msg_failed(location, msg):
-    print '[!] ' + str(hex(location)) + ' ' + msg
+message_and_address_list = []
 
-def get_address_from_disasm():
+def msg_failed(message, location, msg):
+    print '[!] ' + message + ' ' + str(hex(location)) + ' ' + msg
+
+def msg_failed(message, msg):
+    print '[!] ' + message + ' ' + msg
+
+def msg_success(msg):
+    print '[*] Labeled: ' + msg
+
+def get_address_from_disasm(disasm):
+    return hex(int(disasm[4:], 16))
 
 def find_message_func(message, address):
+    # convert string hex to real hex
+    hex_address = hex(int(address, 16))
+    print hex_address
+
     message_destructor_memory_space = 20
-    function = idaapi.get_func(address)
-    max_address = address + message_destructor_memory_space
-    function_start_address = function.startEA
+    current_function = idaapi.get_func(hex_address)
+    max_address = hex_address + message_destructor_memory_space
+    function_start_address = current_function.startEA
 
     current_location = max_address
 
     msg_loaded_stack_var = ''
-    msg_loaded_stack_var_found = False
+    found_msg_loaded_stack_var = False
 
     found_real_address = False
+    real_address = -1
 
     while current_location > function_start_address and not found_real_address:
         # just enter all calls and do step 5
@@ -26,26 +40,26 @@ def find_message_func(message, address):
             func_address = ''
 
             # find the stack var
-            if not msg_loaded_stack_var_found:
+            if not found_msg_loaded_stack_var:
                 if func_disasm.find('Message') != -1:
                     if idc.GetMnem(idc.prev_head(current_location)) == 'rcx':
                         msg_loaded_stack_var = idc.GetDisasm(idc.prev_head(current_location))
-                        msg_loaded_stack_var_found = True
-                    else
-                        msg_failed(current_location, 'Message previous instr wasnt rcx')
+                        found_msg_loaded_stack_var = True
+                    else:
+                        msg_failed(message, current_location, 'Message previous instr wasnt rcx')
             # find the func where the stack var is being loaded into
             if idc.GetMnem(idc.prev_head(current_location)) == 'rcx':
                 rcx = idc.GetDisasm(idc.prev_head(current_location))
                 if rcx == msg_loaded_stack_var:                    
                     if func_disasm.find('sub_') != -1:
-                        
+                        real_address = get_address_from_disasm(func_disasm)
                         found_real_address = True
-                    else
-                        msg_failed(current_location, 'The suspected functions name is already labeled, ' + func_name)
-
-
+                    else:
+                        msg_failed(message,current_location, 'The suspected functions name is already labeled: ' + func_disasm)
 
         current_location = idc.prev_head(current_location)
+
+    return real_address
 
 
 # 1. goto the next function being called
@@ -56,7 +70,7 @@ def find_message_func(message, address):
 # additionally you could compare the type and category 
 
 def label_dumped_messages(dump_file_path):
-    message_and_address_list = []
+    global message_and_address_list
     
     # 1. read the message dump
     with open(dump_file_path, 'r') as f:
@@ -77,19 +91,22 @@ def label_dumped_messages(dump_file_path):
                             break
                     # add to the list
                     if not dupe: 
-                        message_and_address_list.append((message, hex(int(address, 16))))
+                        message_and_address_list.append((message, address))
     
-    print(message_and_address_list)
+    # print(message_and_address_list)
 
     # 3. itterate through the list, in IDA, goto the address, find the message funciton, rename it
     for p in message_and_address_list:
         real_address = find_message_func(p[0], p[1])
-        if real_address:
+        if real_address != -1:
+            msg_success(p[0] + ' ' + real_address)
             # rename the real address
-            idc.MakeName(real_address, p[0])
+            # idc.MakeName(real_address, p[0])
+        else:
+            msg_failed(p[0], 'Couldnt find the message functions real address')
 
-if __name__ == '__main__':
-    label_dumped_messages("E:\\Games\\STAR WARS Battlefront II\\dispatchMessage_dump.txt")
+# if __name__ == '__main__':
+#    label_dumped_messages("E:\\Games\\STAR WARS Battlefront II\\dispatchMessage_dump.txt")
 
 
 # done!
